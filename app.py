@@ -6,7 +6,6 @@ import re
 import subprocess
 import tempfile
 import glob
-from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
@@ -262,14 +261,6 @@ def parse_invoice(text, filename):
     tm = re.search(r'(\d{2}/\d{2}/\d{4})\s+\d{2}/\d{2}/\d{4}', text)
     transfer_on = tm.group(1) if tm else date
 
-    month_name = year = ''
-    if date:
-        try:
-            dt = datetime.strptime(date, '%d/%m/%Y')
-            month_name = dt.strftime('%B')
-            year = str(dt.year)
-        except: pass
-
     amount = 0.0
     am = re.search(r'(?:Total\s+Amount|Invoice\s*Total)[:\s]*USD\s*([\d,]+\.?\d*)', text)
     if not am: am = re.search(r'\bUSD\b\s*\n\s*([\d,]+\.?\d*)', text)
@@ -279,8 +270,8 @@ def parse_invoice(text, filename):
         except: pass
 
     return {
-        'inv_no': inv_no, 'date': date, 'month': month_name, 'year': year,
-        'tour_no': tour_no, 'agent_ref': agent_ref, 'guest_name': guest_name,
+        'inv_no': inv_no, 'date': date, 'tour_no': tour_no,
+        'agent_ref': agent_ref, 'guest_name': guest_name,
         'transfer_on': transfer_on, 'amount': amount,
         'currency': 'USD', 'doc_type': 'TaxInvoice',
         'filename': filename,
@@ -298,7 +289,7 @@ def build_excel(results, month_label=""):
     bdr = Border(left=thin, right=thin, top=thin, bottom=thin)
 
     title = f"Holiday Taxis – Invoices{' · ' + month_label if month_label else ''}"
-    ws.merge_cells('A1:L1')
+    ws.merge_cells('A1:J1')
     c = ws['A1']
     c.value = title
     c.font = Font(bold=True, size=13, color='FFFFFF', name='Calibri')
@@ -306,8 +297,8 @@ def build_excel(results, month_label=""):
     c.alignment = Alignment(horizontal='center', vertical='center')
     ws.row_dimensions[1].height = 28
 
-    headers = ['#', 'Tour No', 'Invoice No', 'Invoice Date', 'Month', 'Year',
-               'Transfer On', 'Doc. Type', 'Guest / Group Name', 'Agent Ref', 'Amount', 'Curr.']
+    headers = ['#', 'Tour No', 'Invoice No', 'Transfer On', 'Doc. Type',
+               'Guest / Group Name', 'Agent Ref', 'Amount', 'Curr.', 'Source File']
     for col, h in enumerate(headers, 1):
         cell = ws.cell(row=2, column=col, value=h)
         cell.font = Font(bold=True, color='FFFFFF', name='Calibri', size=10)
@@ -318,35 +309,33 @@ def build_excel(results, month_label=""):
 
     for i, rec in enumerate(results, 1):
         row = i + 2
-        vals = [i, rec['tour_no'], rec['inv_no'], rec['date'],
-                rec['month'], rec['year'],
-                rec['transfer_on'], rec['doc_type'], rec['guest_name'],
-                rec['agent_ref'], rec['amount'], rec['currency']]
+        vals = [i, rec['tour_no'], rec['inv_no'], rec['transfer_on'],
+                rec['doc_type'], rec['guest_name'], rec['agent_ref'],
+                rec['amount'], rec['currency'], rec['filename']]
         for col, val in enumerate(vals, 1):
             cell = ws.cell(row=row, column=col, value=val)
             cell.font = Font(name='Calibri', size=10)
             cell.border = bdr
             if i % 2 == 0: cell.fill = alt_fill
             if col == 1: cell.alignment = Alignment(horizontal='center')
-            elif col == 11:
+            elif col == 8:
                 cell.alignment = Alignment(horizontal='right')
                 cell.number_format = '#,##0.00'
-            elif col in (5, 6): cell.alignment = Alignment(horizontal='center')
             else: cell.alignment = Alignment(horizontal='left')
 
     tr = len(results) + 3
-    for col in range(1, 13):
+    for col in range(1, 11):
         c2 = ws.cell(row=tr, column=col)
         c2.fill = tot_fill; c2.border = bdr
         c2.font = Font(bold=True, name='Calibri', size=10)
-    ws.cell(row=tr, column=10).value = 'TOTAL'
-    ws.cell(row=tr, column=10).alignment = Alignment(horizontal='right')
-    ws.cell(row=tr, column=11).value = f'=SUM(K3:K{tr-1})'
-    ws.cell(row=tr, column=11).number_format = '#,##0.00'
-    ws.cell(row=tr, column=11).alignment = Alignment(horizontal='right')
-    ws.cell(row=tr, column=12).value = 'USD'
+    ws.cell(row=tr, column=7).value = 'TOTAL'
+    ws.cell(row=tr, column=7).alignment = Alignment(horizontal='right')
+    ws.cell(row=tr, column=8).value = f'=SUM(H3:H{tr-1})'
+    ws.cell(row=tr, column=8).number_format = '#,##0.00'
+    ws.cell(row=tr, column=8).alignment = Alignment(horizontal='right')
+    ws.cell(row=tr, column=9).value = 'USD'
 
-    for i, w in enumerate([5, 15, 20, 14, 12, 8, 14, 12, 32, 20, 12, 8], 1):
+    for i, w in enumerate([5, 15, 20, 14, 12, 32, 20, 12, 8, 30], 1):
         ws.column_dimensions[get_column_letter(i)].width = w
     ws.freeze_panes = 'A3'
 

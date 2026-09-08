@@ -12,14 +12,17 @@ A Streamlit web app that extracts data from Holiday Taxis PDF invoices (in a ZIP
 ```
 app.py            ← Main Streamlit application
 requirements.txt  ← Python dependencies
-packages.txt      ← System packages (pdftotext via poppler-utils)
 ```
+
+PDF text extraction uses `pdftotext` (poppler) when that binary is available,
+and falls back to the pure-Python `pdfminer.six` otherwise — so no system
+packages are needed to deploy.
 
 ## Deploy to Streamlit Community Cloud (Free)
 
 1. **Push to GitHub**
    - Create a new GitHub repository (public or private)
-   - Upload these 3 files: `app.py`, `requirements.txt`, `packages.txt`
+   - Upload these 2 files: `app.py`, `requirements.txt`
 
 2. **Deploy on Streamlit Cloud**
    - Go to [share.streamlit.io](https://share.streamlit.io)
@@ -30,9 +33,11 @@ packages.txt      ← System packages (pdftotext via poppler-utils)
 
 ## Run Locally
 ```bash
-pip install streamlit openpyxl
-sudo apt install poppler-utils   # Linux / WSL
-# brew install poppler            # macOS
+pip install -r requirements.txt
+
+# Optional — sharper extraction if poppler is installed:
+# sudo apt install poppler-utils   # Linux / WSL
+# brew install poppler             # macOS
 
 streamlit run app.py
 ```

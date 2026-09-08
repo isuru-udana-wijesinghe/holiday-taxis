@@ -3,6 +3,7 @@ import zipfile
 import io
 import os
 import re
+import shutil
 import subprocess
 import tempfile
 import glob
@@ -209,13 +210,25 @@ html, body, [class*="css"] {
 
 # ── Extraction logic ────────────────────────────────────────────────────────────
 
+_HAS_PDFTOTEXT = shutil.which('pdftotext') is not None
+
 def extract_text(pdf_bytes):
-    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
-        f.write(pdf_bytes)
-        tmp = f.name
-    result = subprocess.run(['pdftotext', tmp, '-'], capture_output=True, text=True)
-    os.unlink(tmp)
-    return result.stdout
+    # Prefer poppler's pdftotext when the binary is around (best fidelity for
+    # these invoices), else fall back to pure-Python pdfminer.six so the app
+    # needs no system packages on hosts like Streamlit Cloud.
+    if _HAS_PDFTOTEXT:
+        with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as f:
+            f.write(pdf_bytes)
+            tmp = f.name
+        try:
+            result = subprocess.run(['pdftotext', tmp, '-'],
+                                    capture_output=True, text=True)
+            return result.stdout
+        finally:
+            os.unlink(tmp)
+
+    from pdfminer.high_level import extract_text as pdfminer_extract_text
+    return pdfminer_extract_text(io.BytesIO(pdf_bytes))
 
 def is_spaced(s):
     tokens = s.split()
@@ -230,6 +243,17 @@ def collapse_spaced(s):
 def parse_invoice(text, filename):
     lines = text.split('\n')
     vals = [line.strip()[2:].strip() for line in lines if line.strip().startswith(': ')]
+
+    # pdfminer keeps "Label : value" on a single line where pdftotext splits it.
+    # Append those after the primary candidates so they only fill fields that
+    # would otherwise stay blank.
+    for line in lines:
+        s = line.strip()
+        if s.startswith(': '):
+            continue
+        m = re.match(r'^[^:]{0,40}:\s*(\S.*)$', s)
+        if m:
+            vals.append(m.group(1).strip())
 
     inv_no = date = tour_no = agent_ref = guest_name = ''
     transfer_on = ''

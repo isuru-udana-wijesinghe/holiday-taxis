@@ -240,7 +240,78 @@ def collapse_spaced(s):
     result = re.sub(r'\.\s*', '. ', result)
     return result.strip()
 
+_DATE_RE = r'\d{2}/\d{2}/\d{4}'
+_MONEY_RE = r'\d[\d,]*\.\d{2}'
+
+def is_new_format(text):
+    # VAT-era layout (2026+): "Tax Invoice No. : 26NOV_JWTI_49787",
+    # "Date of Supply", VAT breakdown. Older invoices use "I/..." numbers.
+    return bool(re.search(r'_JWTI_\d+', text) or
+                re.search(r'Tax\s+Invoice\s+No\.?\s*:', text, re.I))
+
+def _first(patterns, text, flags=0):
+    for p in patterns:
+        m = re.search(p, text, flags)
+        if m:
+            return m.group(1).strip()
+    return ''
+
+def parse_new_invoice(text):
+    # Labels and values are not always adjacent: pdfminer emits
+    # "Guest/Group Name\n\n: Ms X", while pdftotext puts every right-hand
+    # value on one line (": JWZTP.. : Ms X : JWDILH.. : HYE-..."). Each field
+    # therefore tries the label form first, then the value-sequence form.
+    inv_no = _first([r'\b([A-Z0-9]+_JWTI_\d+)\b',
+                     r'Tax\s+Invoice\s+No\.?\s*:\s*(\S+)'], text)
+    date = _first([r'Date\s+of\s+Invoice\s*:\s*(' + _DATE_RE + ')'], text)
+    transfer_on = _first([r'Date\s+of\s+Supply\s*:\s*(' + _DATE_RE + ')'], text)
+
+    tour_no = _first([r'\b(JWZTP\d+)\b'], text)
+    if not tour_no:
+        tm = re.search(r'J\s*W\s*Z\s*T\s*P\s*[\d\s]+', text)
+        tour_no = re.sub(r'\s', '', tm.group(0)) if tm else ''
+
+    guest_name = _first([r'Guest\s*/\s*Group\s+Name\s*:[ \t]*([^\n:]*\S)',
+                         r'JWZTP\d+\s*:\s*([^:\n]+?)\s*:\s*JWDILH'], text)
+    if guest_name and is_spaced(guest_name):
+        guest_name = collapse_spaced(guest_name)
+
+    agent_ref = _first([r'Agent\s+Reference\s*:[ \t]*([A-Z0-9][\w\-/]*)',
+                        r'JWDILH\w*\s*:\s*([A-Z0-9][\w\-/]*)'], text)
+
+    # The totals block lists: value of supply, VAT, total incl. VAT. Find the
+    # first three amounts after it that add up, so layout order can't fool us.
+    amount = 0.0
+    tv = re.search(r'Total\s+Value\s+of\s+Supply', text, re.I)
+    if tv:
+        nums = [float(n.replace(',', ''))
+                for n in re.findall(_MONEY_RE, text[tv.end():])]
+        for i in range(len(nums) - 2):
+            a, b, c = nums[i:i + 3]
+            if abs(a + b - c) < 0.015:
+                amount = c
+                break
+        if not amount and nums:
+            amount = max(nums[:3])
+
+    return {
+        'inv_no': inv_no, 'date': date, 'tour_no': tour_no,
+        'agent_ref': agent_ref, 'guest_name': guest_name,
+        'transfer_on': transfer_on or date, 'amount': amount,
+    }
+
 def parse_invoice(text, filename):
+    legacy = parse_legacy_invoice(text, filename)
+    if not is_new_format(text):
+        return legacy
+    rec = parse_new_invoice(text)
+    # Any field the new parser couldn't find falls back to the legacy guess.
+    for k, v in rec.items():
+        if v:
+            legacy[k] = v
+    return legacy
+
+def parse_legacy_invoice(text, filename):
     lines = text.split('\n')
     vals = [line.strip()[2:].strip() for line in lines if line.strip().startswith(': ')]
 
